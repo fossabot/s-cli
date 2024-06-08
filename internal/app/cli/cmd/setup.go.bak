@@ -1,0 +1,22 @@
+package cmd
+
+import (
+	"github.com/spf13/cobra"
+	"skynx.io/s-cli/internal/app/cli/setup"
+	"skynx.io/s-cli/pkg/vars"
+)
+
+var setupCmd = &cobra.Command{
+	Use:   "setup",
+	Short: "First-time setup",
+	Long:  appHeader(`First-time setup.`),
+	Args:  cobra.NoArgs,
+	PreRun: func(cmd *cobra.Command, args []string) {
+		header()
+	},
+	Run: func(cmd *cobra.Command, args []string) {
+		setup.Configure()
+	},
+}
+
+func init() {}

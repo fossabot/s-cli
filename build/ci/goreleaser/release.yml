@@ -1,0 +1,308 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+
+version: 2
+
+project_name: skynx-cli
+
+dist: _dist
+
+# env_files:
+#   github_token: ~/.cloud/github/github_token.buildbot
+
+env:
+  - GO111MODULE=on
+  # - PKG_REPO='skynx'
+  # - PKG_REPO_DEV='skynx-dev'
+
+before:
+  hooks:
+    # - go mod tidy -v
+    # - go mod vendor
+    # - go mod verify
+    # - go generate $(go list ./... | grep -v /vendor/)
+    # - go fmt $(go list ./... | grep -v '/vendor/' | grep -v '.pb.go' | grep -v '.twirp.go' | grep -v 'bindata.go') | tee /dev/stderr
+    - ./scripts/completions.sh
+
+builds:
+  - id: "skynx-cli"
+    main: cmd/cli/main.go
+    binary: skynxctl
+    flags:
+      #- -tags=dev
+      - -tags="static_build,netgo"
+      - -v
+      - -a
+      - -mod=vendor
+      - -installsuffix=netgo
+      - -trimpath
+      #- -race # requires CGO_ENABLED=1
+    # Custom ldflags templates.
+    # Default is `-s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}} -X main.builtBy=goreleaser`.
+    ldflags:
+      - -s
+      - -w
+      - -X skynx.io/s-lib/pkg/version.GitRepository={{.GitURL}}
+      - -X skynx.io/s-lib/pkg/version.GitCommit={{.ShortCommit}}
+      - -X skynx.io/s-lib/pkg/version.VersionNumber={{.Tag}}
+      - -X skynx.io/s-lib/pkg/version.VersionDate={{.Env.VERSION_DATE}}
+      - -X skynx.io/s-lib/pkg/version.GoVersion={{.Env.GO_VERSION}}
+      - -extldflags -static
+      #- ./usemsan=-msan
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    goamd64:
+      - v1
+      # - v2
+      # - v3
+      # - v4
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+    # lang: go
+
+snapshot:
+  # name_template: '{{ .Tag }}-SNAPSHOT-{{.ShortCommit}}'
+  # name_template: '{{ .Version }}-SNAPSHOT-{{.ShortCommit}}'
+  name_template: "{{ .Version }}-{{.Env.VERSION_DATE}}-SNAPSHOT-{{.ShortCommit}}"
+
+checksum:
+  # name_template: '{{ .ProjectName }}_{{ .Tag }}_checksums.txt'
+  # name_template: '{{ .ProjectName }}_{{ .Version }}_checksums.txt'
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+signs:
+  - cmd: cosign
+    env:
+      # - COSIGN_EXPERIMENTAL=1
+    stdin: "{{ .Env.COSIGN_PWD }}"
+    # certificate: "${artifact}.pem"
+    args:
+      - "sign-blob"
+      - "--key=/cosign/cosign.key"
+      # - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes" # needed on cosign 2.0.0+
+    artifacts: checksum
+    output: false
+
+docker_signs:
+  - cmd: cosign
+    env:
+      # - COSIGN_EXPERIMENTAL=1
+    stdin: "{{ .Env.COSIGN_PWD }}"
+    args:
+      - "sign"
+      - "--key=/cosign/cosign.key"
+      - "${artifact}"
+      - "--yes" # needed on cosign 2.0.0+
+    artifacts: manifests
+    output: false
+
+sboms:
+  - artifacts: archive
+
+archives:
+  - id: skynx-cli
+    builds:
+      - skynx-cli
+    # name_template: "{{ .ProjectName }}_{{ .Tag }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    wrap_in_directory: false
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - ./README.md
+      - ./SECURITY.md
+      - ./SUPPORT.md
+      - ./LICENSE
+      - src: ./_build/completions/*
+        dst: completions
+        strip_parent: true
+        info:
+          owner: root
+          group: root
+          mode: 0644
+
+brews:
+  - repository:
+      owner: skynx-io
+      name: homebrew-tap
+      branch: master
+    directory: Formula
+    goarm: "6"
+    goamd64: v1
+    commit_author:
+      name: skynxbot
+      email: skynxbot@skynx.com
+    homepage: https://skynx.com
+    description: skynx-cli
+    license: "Apache License 2.0"
+    test: |
+      system "#{bin}/skynxctl version show"
+    install: |-
+      bin.install "skynxctl"
+      bash_completion.install "completions/skynxctl.bash" => "skynxctl"
+      zsh_completion.install "completions/skynxctl.zsh" => "_skynxctl"
+      fish_completion.install "completions/skynxctl.fish"
+
+nfpms:
+  - id: skynx-cli
+    package_name: skynx-cli
+    # file_name_template: "{{ .ProjectName }}_{{ .Tag }}_{{ .Os }}_{{ .Arch }}"
+    # file_name_template: "{{ .ProjectName }}_{{ .Arch }}"
+    # file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    file_name_template: "{{ .ConventionalFileName }}"
+    builds:
+      - skynx-cli
+    vendor: skynx.com
+    homepage: https://skynx.com
+    maintainer: skynxbot <skynxbot@skynx.com>
+    description: |-
+      skynx command line interface for interacting with the skynx SASE platform.
+    license: "Apache License 2.0"
+    formats:
+      - deb
+      - rpm
+      - apk
+    bindir: /usr/bin
+    section: misc
+    priority: optional
+    meta: false
+    contents:
+      # basic files that apply to all packagers
+      - src: ./README.md
+        dst: /usr/share/doc/skynx-cli/README.md
+      - src: ./SECURITY.md
+        dst: /usr/share/doc/skynx-cli/SECURITY.md
+      - src: ./SUPPORT.md
+        dst: /usr/share/doc/skynx-cli/SUPPORT.md
+      - src: ./LICENSE
+        dst: /usr/share/doc/skynx-cli/LICENSE
+      - src: ./_build/completions/skynxctl.bash
+        dst: /usr/share/bash-completion/completions/skynxctl
+        file_info:
+          mode: 0644
+      - src: ./_build/completions/skynxctl.fish
+        dst: /usr/share/fish/completions/skynxctl.fish
+        file_info:
+          mode: 0644
+      - src: ./_build/completions/skynxctl.zsh
+        dst: /usr/share/zsh/vendor-completions/_skynxctl
+        file_info:
+          mode: 0644
+    deb:
+      lintian_overrides:
+        - statically-linked-binary
+        - changelog-file-missing-in-native-package
+
+dockers:
+  - dockerfile: ./build/package/dockerfiles/Dockerfile
+    skip_push: false
+    image_templates:
+      - "skynx/skynxctl:latest"
+      - "skynx/skynxctl:snapshot"
+      - "skynx/skynxctl:dev"
+      - "skynx/skynxctl:stable"
+      - "skynx/skynxctl:{{ .Tag }}"
+      - "skynx/skynxctl:{{ .Tag }}-{{ .Env.GO_VERSION }}"
+      - "skynx/skynxctl:v{{ .Major }}"
+      - "skynx/skynxctl:v{{ .Major }}.{{ .Minor }}"
+      # - "ghcr.io/skynx-io/skynxctl:latest"
+      # - "ghcr.io/skynx-io/skynxctl:snapshot"
+      # - "ghcr.io/skynx-io/skynxctl:dev"
+      # - "ghcr.io/skynx-io/skynxctl:stable"
+      # - "ghcr.io/skynx-io/skynxctl:{{ .Tag }}"
+      # - "ghcr.io/skynx-io/skynxctl:{{ .Tag }}-{{ .Env.GO_VERSION }}"
+      # - "ghcr.io/skynx-io/skynxctl:v{{ .Major }}"
+      # - "ghcr.io/skynx-io/skynxctl:v{{ .Major }}.{{ .Minor }}"
+    use: buildx
+    goos: linux
+    goarch: amd64
+    build_flag_templates:
+      - "--pull"
+      - "--label=io.artifacthub.package.readme-url=https://raw.githubusercontent.com/skynx-io/s-cli/master/README.md"
+      - "--label=io.artifacthub.package.license=Apache License 2.0"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.name={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      # - "--label=org.opencontainers.image.source={{.GitURL}}"
+      - "--label=org.opencontainers.image.source=https://github.com/skynx-io/s-cli"
+      - "--platform=linux/amd64"
+      - "--rm"
+      - "--force-rm"
+      - "--no-cache"
+
+release:
+  github:
+    owner: skynx-io
+    name: s-cli
+  draft: false
+  prerelease: auto # auto | true | false
+  name_template: "{{.Tag}}"
+  disable: false
+  # extra_files:
+  #   - glob: ./_dist/*.sig
+  footer: |
+    **Full Changelog**: https://github.com/skynx-io/s-cli/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+    ## What to do next?
+
+    - Read the [documentation](https://skynx.com/docs/)
+    - Join our [Discord server](https://skynx.com/discord)
+    - Follow us on [X](https://x.com/skynxHQ)
+    - Follow us on [Mastodon](https://mastodon.social/@skynx)
+
+changelog:
+  disable: false
+  use: github
+  sort: asc
+  groups:
+    - title: Features
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: "Bug fixes"
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - "^doc"
+      - "^chore"
+      - "^wip"
+      - "^test"
+      - "^typo"
+      - "^Merge"
+
+announce:
+  discord:
+    enabled: true
+    author: skynx
+    color: "46299"
+    icon_url: https://raw.githubusercontent.com/skynx-io/assets/master/images/logo/skynx-logo_black-blue_1400x1400.png
+  twitter:
+    enabled: false
+# publishers:
+#   # dev repos
+#   - name: repo.dev.skynx.com/apt
+#     cmd: ./build/_deps/scripts/_local/build/pkg-upload.sh '{{ dir .ArtifactPath }}/{{ .ProjectName }}ctl_{{ .Tag }}_{{ .Os }}_{{ .Arch }}.deb' '{{.Env.PKG_REPO_DEV}}'
+#   - name: repo.dev.skynx.com/yum
+#     cmd: ./build/_deps/scripts/_local/build/pkg-upload.sh '{{ dir .ArtifactPath }}/{{ .ProjectName }}ctl_{{ .Tag }}_{{ .Os }}_{{ .Arch }}.rpm' '{{.Env.PKG_REPO_DEV}}'
+#   # stable repos
+#   - name: repo.skynx.com/apt
+#     cmd: ./build/_deps/scripts/_local/build/pkg-upload.sh '{{ dir .ArtifactPath }}/{{ .ProjectName }}ctl_{{ .Tag }}_{{ .Os }}_{{ .Arch }}.deb' '{{.Env.PKG_REPO}}'
+#   - name: repo.skynx.com/yum
+#     cmd: ./build/_deps/scripts/_local/build/pkg-upload.sh '{{ dir .ArtifactPath }}/{{ .ProjectName }}ctl_{{ .Tag }}_{{ .Os }}_{{ .Arch }}.rpm' '{{.Env.PKG_REPO}}'

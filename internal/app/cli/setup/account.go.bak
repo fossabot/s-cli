@@ -1,0 +1,68 @@
+package setup
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/spf13/viper"
+	"skynx.io/s-api-go/grpc/resources/controller"
+	"skynx.io/s-cli/internal/app/cli/auth/login"
+	"skynx.io/s-cli/pkg/client"
+	"skynx.io/s-cli/pkg/client/account"
+	"skynx.io/s-cli/pkg/config"
+	"skynx.io/s-cli/pkg/grpc"
+	"skynx.io/s-cli/pkg/status"
+	"skynx.io/s-cli/pkg/vars"
+)
+
+func setupExistingAccount() {
+	client.Auth().Login(login.NewRequest(), true)
+
+	accountID := viper.GetString("logged.realm")
+	userEmail := viper.GetString("logged.email")
+
+	if len(accountID) == 0 {
+		status.Error(fmt.Errorf("missing accountID"), "Invalid accountID")
+	}
+
+	if len(userEmail) == 0 {
+		status.Error(fmt.Errorf("missing email"), "Invalid email")
+	}
+
+	viper.Set("account.id", accountID)
+
+	vars.AccountID = accountID
+
+	a := account.GetAccount()
+
+	nxc, grpcConn := grpc.GetManagerProviderAPIClient(true)
+	defer grpcConn.Close()
+
+	a, err := nxc.GetAccount(context.TODO(), a)
+	if err != nil {
+		status.Error(err, "Unable to get account")
+	}
+
+	f := &controller.Federation{
+		LocationID:   a.LocationID,
+		FederationID: a.FederationID,
+	}
+
+	f, err = nxc.GetFederation(context.TODO(), f)
+	if err != nil {
+		status.Error(err, "Unable to get federation")
+	}
+
+	var cAuthServer, cEndpoint string
+	for _, c := range f.Controllers {
+		cAuthServer = fmt.Sprintf("https://%s", c.VirtualHost)
+		cEndpoint = fmt.Sprintf("%s:%d", c.VirtualHost, c.Port)
+		break
+	}
+
+	if err := config.DefaultAccount(cAuthServer, cEndpoint, accountID, userEmail); err != nil {
+		status.Error(err, "Unable to write configuration file")
+	}
+
+	fmt.Printf("Ready to go :)\n\n")
+}
