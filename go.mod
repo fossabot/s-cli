@@ -10,7 +10,7 @@ replace skynx.io/s-lib => ../s-lib
 
 require (
 	github.com/AlecAivazis/survey/v2 v2.3.7
-	github.com/briandowns/spinner v1.19.0
+	github.com/briandowns/spinner v1.23.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
 	github.com/hokaccha/go-prettyjson v0.0.0-20211117102719-0474bc63780f
